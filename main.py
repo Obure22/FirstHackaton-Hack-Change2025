@@ -286,4 +286,4 @@ def evaluate():
 
 if __name__ == "__main__":
     # host="0.0.0.0" — пригодится для деплоя
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000)
