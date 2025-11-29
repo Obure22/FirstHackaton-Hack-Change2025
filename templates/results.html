@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}Результаты классификации{% endblock %}
+
+{% block content %}
+
+<section class="card">
+    <h2>Итоговая статистика</h2>
+    <div class="stats">
+        {% for label in labels_order %}
+            <div class="stat-item">
+                <div class="stat-label">{{ label }}</div>
+                <div class="stat-value">{{ counts.get(label, 0) }}</div>
+            </div>
+        {% endfor %}
+    </div>
+
+    <div class="chart-wrapper">
+        <canvas id="sentimentChart"></canvas>
+    </div>
+
+    <a class="button primary" href="{{ url_for('download', file_id=file_id) }}">
+        Скачать размеченный CSV
+    </a>
+    <a class="button" href="{{ url_for('index') }}">На главную</a>
+</section>
+
+<section class="card">
+    <h2>Предсказанные отзывы (первые 200)</h2>
+
+    <div class="filters">
+        <input type="text" id="searchInput" placeholder="Поиск по тексту...">
+        <select id="sentimentFilter">
+            <option value="">Все тональности</option>
+            {% for label in labels_order %}
+                <option value="{{ label }}">{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <table id="resultsTable">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Текст</th>
+                <th>Источник (src)</th>
+                <th>Тональность</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in table %}
+                <tr data-sentiment="{{ row['label_name'] | e }}">
+                    <td>{{ loop.index }}</td>
+                    <td class="text-cell">{{ row['text'] }}</td>
+                    <td>{{ row['src'] }}</td>
+                    <td>{{ row['label_name'] }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<script>
+    // --- данные для графика ---
+    const chartLabels = {{ labels_order | tojson }};
+    const chartData = chartLabels.map(label => {{ counts | tojson }}[label] || 0);
+
+    const ctx = document.getElementById('sentimentChart').getContext('2d');
+    const sentimentChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: chartLabels,
+            datasets: [{
+                label: 'Количество отзывов',
+                data: chartData
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: { precision: 0 }
+                }
+            }
+        }
+    });
+
+    // --- фильтрация/поиск ---
+    const searchInput = document.getElementById('searchInput');
+    const sentimentFilter = document.getElementById('sentimentFilter');
+    const tableRows = document.querySelectorAll('#resultsTable tbody tr');
+
+    function applyFilters() {
+        const query = searchInput.value.toLowerCase();
+        const sentiment = sentimentFilter.value;
+
+        tableRows.forEach(row => {
+            const text = row.querySelector('.text-cell').innerText.toLowerCase();
+            const rowSentiment = row.getAttribute('data-sentiment');
+
+            const matchText = !query || text.includes(query);
+            const matchSentiment = !sentiment || rowSentiment === sentiment;
+
+            if (matchText && matchSentiment) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    }
+
+    searchInput.addEventListener('input', applyFilters);
+    sentimentFilter.addEventListener('change', applyFilters);
+</script>
+
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Оценка качества модели{% endblock %}
+
+{% block content %}
+
+<section class="card">
+    <h2>Macro-F1</h2>
+    <p class="big-metric">{{ macro_f1 }}</p>
+    <a class="button" href="{{ url_for('index') }}">На главную</a>
+</section>
+
+<section class="card">
+    <h2>Подробный отчёт по классам</h2>
+    <pre class="report-block">{{ report }}</pre>
+</section>
+
+{% endblock %}

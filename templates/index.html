@@ -1,26 +1,28 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Анализ тональности отзывов</title>
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="stylesheet" href="./styles/global.css" />
-    <link rel="stylesheet" href="./styles/style.css" />
-</head>
-<body>
-<main>
-    <div class="MainBox">
-        <h1 class="EnterText">Введите текст для анализа</h1>
-        <form method="post" class="PostForm">
-        <textarea name="text" rows="5" cols="40" placeholder="Введите отзыв здесь"></textarea>
-        <button type="submit">Анализировать</button>
-        </form>
-        {% if result %}
-        <h3>Результат:</h3>
-        <p>{{ result }}</p>
-        {% endif %}
-    </div>
-</main>
-</body>
-</html>
+{% extends "base.html" %}
+
+{% block title %}Главная — Анализатор тональности{% endblock %}
+
+{% block content %}
+
+<section class="card">
+    <h2>1. Классификация отзывов</h2>
+    <p>Загрузите CSV с колонкой <code>text</code> (и опционально <code>src</code>), чтобы получить предсказанные тональности.</p>
+    <form action="{{ url_for('analyze') }}" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".csv" required>
+        <button type="submit">Запустить разметку</button>
+    </form>
+    <p class="hint">
+        Пример структуры: <code>text,src</code>
+    </p>
+</section>
+
+<section class="card">
+    <h2>2. Оценка качества модели (macro-F1)</h2>
+    <p>Загрузите валидационный CSV с колонками <code>text</code> и <code>label</code> (0 — отрицательная, 1 — нейтральная, 2 — положительная).</p>
+    <form action="{{ url_for('evaluate') }}" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".csv" required>
+        <button type="submit">Посчитать macro-F1</button>
+    </form>
+</section>
+
+{% endblock %}
