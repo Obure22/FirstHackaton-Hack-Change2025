@@ -1,0 +1,32 @@
+#Сохранение модели
+
+import os
+import shutil
+
+save_path = "/kaggle/working/model"
+
+print("Создаю директорию:", save_path)
+os.makedirs(save_path, exist_ok=True)
+
+# Сохраняем модель и токенизатор
+print("Сохраняю модель...")
+model.save_pretrained(save_path)
+tokenizer.save_pretrained(save_path)
+
+print("\nПроверяю содержимое каталога модели:")
+!ls -lh /kaggle/working/model
+
+# Создаём ZIP, чтобы можно было скачать
+zip_path = "/kaggle/working/model.zip"
+print("\nАрхивирую модель в:", zip_path)
+
+# если zip уже существовал — удалим
+if os.path.exists(zip_path):
+    os.remove(zip_path)
+
+!zip -r /kaggle/working/model.zip /kaggle/working/model > /dev/null
+
+print("\nГотово! Вот архив:")
+!ls -lh /kaggle/working/model.zip
+
+print("\nТеперь model.zip появится справа в разделе Output — его можно скачать.")

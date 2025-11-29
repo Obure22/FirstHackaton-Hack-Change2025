@@ -1,0 +1,206 @@
+import glob
+import random
+import numpy as np
+import pandas as pd
+from tqdm.auto import tqdm
+
+import torch
+from torch.utils.data import Dataset, DataLoader
+from torch import nn
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score
+
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSequenceClassification,
+    get_linear_schedule_with_warmup
+)
+from torch.optim import AdamW
+
+
+SEED = 42
+MODEL_NAME = "cointegrated/rubert-tiny"
+MAX_LEN = 128
+TRAIN_BATCH_SIZE = 32
+VAL_BATCH_SIZE = 64
+EPOCHS = 3
+LR = 2e-5
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using device:", DEVICE)
+
+# Репродюсабельность
+def set_seed(seed: int = 42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+set_seed(SEED)
+
+
+def find_file(pattern):
+    files = glob.glob(pattern, recursive=True)
+    return files[0] if files else None
+
+train_path = find_file("/kaggle/input/**/train.csv")
+print("train_path:", train_path)
+
+if train_path is None:
+    raise FileNotFoundError("Не найден train.csv. Добавь датасет через 'Add data'.")
+
+train_df = pd.read_csv(train_path)
+print("train_df shape:", train_df.shape)
+print(train_df.head())
+
+
+if "text" not in train_df.columns or "label" not in train_df.columns:
+    raise ValueError("train.csv должен содержать 'text' и 'label'.")
+
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+
+class ReviewsDataset(Dataset):
+    def __init__(self, texts, labels=None, tokenizer=None, max_len=128):
+        self.texts = texts
+        self.labels = labels
+        self.tokenizer = tokenizer
+        self.max_len = max_len
+
+    def __len__(self):
+        return len(self.texts)
+
+    def __getitem__(self, idx):
+        text = str(self.texts[idx])
+        enc = self.tokenizer(
+            text,
+            truncation=True,
+            padding="max_length",
+            max_length=self.max_len,
+            return_tensors="pt",
+        )
+        item = {k: v.squeeze(0) for k, v in enc.items()}
+        if self.labels is not None:
+            item["labels"] = torch.tensor(int(self.labels[idx]), dtype=torch.long)
+        return item
+
+
+train_part, val_part = train_test_split(
+    train_df,
+    test_size=0.2,
+    stratify=train_df["label"],
+    random_state=SEED
+)
+
+train_loader = DataLoader(
+    ReviewsDataset(train_part["text"].tolist(), train_part["label"].tolist(), tokenizer, MAX_LEN),
+    batch_size=TRAIN_BATCH_SIZE,
+    shuffle=True
+)
+val_loader = DataLoader(
+    ReviewsDataset(val_part["text"].tolist(), val_part["label"].tolist(), tokenizer, MAX_LEN),
+    batch_size=VAL_BATCH_SIZE,
+    shuffle=False
+)
+
+print("Train size:", len(train_part))
+print("Val size:", len(val_part))
+
+
+num_labels = train_df["label"].nunique()
+model = AutoModelForSequenceClassification.from_pretrained(
+    MODEL_NAME,
+    num_labels=num_labels
+)
+model.to(DEVICE)
+
+optimizer = AdamW(model.parameters(), lr=LR)
+total_steps = len(train_loader) * EPOCHS
+
+scheduler = get_linear_schedule_with_warmup(
+    optimizer,
+    num_warmup_steps=int(0.1 * total_steps),
+    num_training_steps=total_steps
+)
+
+loss_fn = nn.CrossEntropyLoss()
+
+
+def train_one_epoch(model, loader, optimizer, scheduler, device):
+    model.train()
+    total_loss = 0.0
+
+    pbar = tqdm(loader, desc="Training")
+    for batch in pbar:
+        batch = {k: v.to(device) for k, v in batch.items()}
+        optimizer.zero_grad()
+
+        outputs = model(**batch)
+        loss = outputs.loss
+
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+
+        total_loss += loss.item()
+        pbar.set_postfix({"loss": loss.item()})
+
+    return total_loss / len(loader)
+
+def eval_model(model, loader, device):
+    model.eval()
+    preds = []
+    trues = []
+    total_loss = 0.0
+
+    with torch.no_grad():
+        pbar = tqdm(loader, desc="Validating")
+        for batch in pbar:
+            labels = batch["labels"].to(device)
+            inputs = {k: v.to(device) for k, v in batch.items() if k != "labels"}
+
+            outputs = model(**inputs, labels=labels)
+            loss = outputs.loss
+            logits = outputs.logits
+
+            total_loss += loss.item()
+
+            pred = torch.argmax(logits, dim=1).cpu().numpy()
+            preds.extend(pred)
+            trues.extend(labels.cpu().numpy())
+
+    avg_loss = total_loss / len(loader)
+    f1 = f1_score(trues, preds, average="macro")
+    return avg_loss, f1
+
+
+best_f1 = 0
+best_state_dict = None
+
+for epoch in range(EPOCHS):
+    print(f"\n===== Epoch {epoch+1}/{EPOCHS} =====")
+    train_loss = train_one_epoch(model, train_loader, optimizer, scheduler, DEVICE)
+    val_loss, val_f1 = eval_model(model, val_loader, DEVICE)
+
+    print(f"Train loss: {train_loss:.4f}")
+    print(f"Val loss:   {val_loss:.4f}")
+    print(f"Val F1:     {val_f1:.4f}")
+
+    if val_f1 > best_f1:
+        best_f1 = val_f1
+        best_state_dict = model.state_dict()
+        print(">>> New best model saved (in RAM).")
+
+print("\nBest macro-F1:", best_f1)
+
+
+save_path = "/kaggle/working/model"
+os.makedirs(save_path, exist_ok=True)
+
+if best_state_dict is not None:
+    model.load_state_dict(best_state_dict)
+
+model.save_pretrained(save_path)
+tokenizer.save_pretrained(save_path)
+
+print("Модель сохранена в:", save_path)
